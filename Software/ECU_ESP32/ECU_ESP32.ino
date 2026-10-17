@@ -23,6 +23,7 @@ Disclaimer : Code is opensource and can be modified by everyone. If you can impr
 #include <Adafruit_NeoPixel.h>
 #include "WiFi.h"
 #include <esp_now.h>
+#include <esp_idf_version.h>
 #include <Wire.h>
 #include <VL6180X_WE.h>
 
@@ -345,8 +346,13 @@ void initTOFSensor(void) {
 }
 /******************************** TOF SENSOR CODE  ******************************/
 
-//Callback function after a transmission has been sent
+// ESP-IDF 5.5 replaced the peer MAC with send-info metadata in the send callback.
+// Older ESP32 cores still use the original MAC-address callback signature.
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
+void transmissionComplete(const esp_now_send_info_t *sendInfo, esp_now_send_status_t transmissionStatus) {
+#else
 void transmissionComplete(const uint8_t *receiver_mac, esp_now_send_status_t transmissionStatus) {
+#endif
   if (transmissionStatus == 0) {
     TransmisionStatus = TRANSMISIONSUCCESFULL_en;
   } else {
@@ -355,8 +361,19 @@ void transmissionComplete(const uint8_t *receiver_mac, esp_now_send_status_t tra
     Serial.println(transmissionStatus);
   }
 }
-//Callback function after a transmission has been received
+// ESP-IDF 5.x passes receive metadata rather than a bare sender MAC address.
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+void dataReceived(const esp_now_recv_info_t *receiveInfo, const uint8_t *data, int data_len) {
+  if (receiveInfo == nullptr || receiveInfo->src_addr == nullptr) return;
+  const uint8_t *senderMac = receiveInfo->src_addr;
+#else
 void dataReceived(const uint8_t *senderMac, const uint8_t *data, int data_len) {
+#endif
+  // Reject truncated packets before memcpy or indexing the 3-byte payload.
+  if (data == nullptr || data_len < static_cast<int>(sizeof(packet))) {
+    Serial.println("Ignoring truncated ESP-NOW packet");
+    return;
+  }
   char macStr[18];
   snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x", senderMac[0], senderMac[1], senderMac[2], senderMac[3], senderMac[4], senderMac[5]);
 
